@@ -43,6 +43,8 @@ dependencies:
   share_plus: ^10.0.0
   file_saver: ^0.2.7
   qr_flutter: ^4.0.0
+  google_mobile_ads: ^5.1.0
+  get: ^4.6.5
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

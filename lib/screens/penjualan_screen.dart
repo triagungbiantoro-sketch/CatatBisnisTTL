@@ -6,6 +6,8 @@ import 'package:pdf/pdf.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../db/database_helper.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:get/get.dart';
 
 class PenjualanScreen extends StatefulWidget {
   const PenjualanScreen({super.key});
@@ -19,20 +21,76 @@ class _PenjualanScreenState extends State<PenjualanScreen>
   List<Map<String, dynamic>> penjualanList = [];
   List<Map<String, dynamic>> produkList = [];
 
+  BannerAd? _bannerAd;
+  InterstitialAd? _interstitialAd;
+  bool _isInterstitialReady = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadData();
+    _initBannerAd();
+    _loadInterstitialAd();
+  }
+
+  void _initBannerAd() {
+    _bannerAd = BannerAd(
+      adUnitId: 'ca-app-pub-6043960664919055~8946073109',
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (ad) => setState(() {}),
+        onAdFailedToLoad: (ad, err) {
+          ad.dispose();
+          debugPrint('Banner gagal dimuat: $err');
+        },
+      ),
+    )..load();
+  }
+
+  void _loadInterstitialAd() {
+    InterstitialAd.load(
+      adUnitId: 'ca-app-pub-6043960664919055/4042883172',
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _interstitialAd = ad;
+          _isInterstitialReady = true;
+        },
+        onAdFailedToLoad: (err) {
+          debugPrint('Interstitial gagal dimuat: $err');
+          _isInterstitialReady = false;
+        },
+      ),
+    );
+  }
+
+  void _showInterstitial() {
+    if (_isInterstitialReady && _interstitialAd != null) {
+      _interstitialAd!.fullScreenContentCallback =
+          FullScreenContentCallback(onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _loadInterstitialAd();
+      }, onAdFailedToShowFullScreenContent: (ad, err) {
+        ad.dispose();
+        _loadInterstitialAd();
+      });
+
+      _interstitialAd!.show();
+      _interstitialAd = null;
+      _isInterstitialReady = false;
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _bannerAd?.dispose();
+    _interstitialAd?.dispose();
     super.dispose();
   }
 
-  /// ✅ Refresh otomatis setelah restore database / kembali ke foreground
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -59,166 +117,192 @@ class _PenjualanScreenState extends State<PenjualanScreen>
   }
 
   Future<void> _showPenjualanForm({Map<String, dynamic>? penjualan}) async {
-    int? selectedProdukId = penjualan?['produk_id'];
-    String jumlahStr = penjualan?['jumlah']?.toString() ?? '';
+    if (penjualan == null) _showInterstitial();
+
+    if (produkList.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('tidak_ada_produk'.tr)),
+      );
+      return;
+    }
+
+    Map<String, dynamic>? selectedProduk;
+    TextEditingController produkController =
+        TextEditingController(text: penjualan?['produk_nama'] ?? '');
+    TextEditingController jumlahController =
+        TextEditingController(text: penjualan?['jumlah']?.toString() ?? '');
 
     await showDialog(
       context: context,
       builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              title: Text(
-                penjualan == null ? 'Tambah Penjualan' : 'Edit Penjualan',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    DropdownButtonFormField<int>(
-                      value: selectedProdukId,
-                      items: produkList.map((produk) {
-                        return DropdownMenuItem<int>(
-                          value: produk['id'],
-                          child: Text(
-                              '${produk['nama']} (Stok: ${produk['stok']})'),
-                        );
-                      }).toList(),
-                      onChanged: (value) =>
-                          setDialogState(() => selectedProdukId = value),
-                      decoration: const InputDecoration(
-                        labelText: 'Pilih Produk',
-                        border: OutlineInputBorder(),
-                      ),
+        return StatefulBuilder(builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Text(
+              penjualan == null
+                  ? 'tambah_penjualan'.tr
+                  : 'edit_penjualan'.tr,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ===== Autocomplete modern =====
+                  Autocomplete<Map<String, dynamic>>(
+                    optionsBuilder: (TextEditingValue textEditingValue) {
+                      if (textEditingValue.text.isEmpty) return const Iterable.empty();
+                      return produkList.where((p) => (p['nama'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(textEditingValue.text.toLowerCase()));
+                    },
+                    displayStringForOption: (option) => option['nama'],
+                    initialValue: selectedProduk != null
+                        ? TextEditingValue(text: selectedProduk!['nama'])
+                        : TextEditingValue(text: produkController.text),
+                    fieldViewBuilder: (context, controller, focusNode, onEditingComplete) {
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        decoration: InputDecoration(
+                          labelText: 'pilih_produk'.tr,
+                          border: const OutlineInputBorder(),
+                          suffixIcon: controller.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      controller.clear();
+                                      selectedProduk = null;
+                                    });
+                                  },
+                                )
+                              : null,
+                        ),
+                      );
+                    },
+                    onSelected: (selection) {
+                      setDialogState(() {
+                        selectedProduk = selection;
+                        produkController.text = selection['nama'];
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Input jumlah
+                  TextField(
+                    controller: jumlahController,
+                    decoration: InputDecoration(
+                      labelText: 'jumlah'.tr,
+                      border: const OutlineInputBorder(),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      decoration: const InputDecoration(
-                        labelText: 'Jumlah',
-                        border: OutlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.number,
-                      controller: TextEditingController(text: jumlahStr),
-                      onChanged: (value) => jumlahStr = value,
-                    ),
-                  ],
-                ),
+                    keyboardType: TextInputType.number,
+                  ),
+                ],
               ),
-              actions: [
-                TextButton(
+            ),
+            actions: [
+              TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Batal'),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    if (selectedProdukId == null || jumlahStr.isEmpty) {
+                  child: Text('batal'.tr)),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  if (selectedProduk == null || jumlahController.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('produk_jumlah_wajib'.tr)),
+                    );
+                    return;
+                  }
+
+                  int jumlah = int.tryParse(jumlahController.text) ?? 0;
+                  if (jumlah <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('jumlah_lebih_dari_0'.tr)),
+                    );
+                    return;
+                  }
+
+                  final produk = selectedProduk!;
+                  if (penjualan == null && produk['stok'] < jumlah) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('stok_tidak_mencukupi'.tr)),
+                    );
+                    return;
+                  }
+
+                  double harga = produk['harga'];
+                  double total = harga * jumlah;
+                  String tanggal = DateTime.now().toIso8601String();
+
+                  if (penjualan == null) {
+                    await DatabaseHelper.instance.insert('penjualan', {
+                      'produk_id': produk['id'],
+                      'jumlah': jumlah,
+                      'total': total,
+                      'tanggal': tanggal,
+                    });
+
+                    await DatabaseHelper.instance.update(
+                      'produk',
+                      {'stok': produk['stok'] - jumlah},
+                      'id = ?',
+                      [produk['id']],
+                    );
+                  } else {
+                    int jumlahLama = penjualan['jumlah'];
+                    int selisih = jumlah - jumlahLama;
+
+                    if (produk['stok'] < selisih) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Produk dan jumlah wajib diisi'),
-                        ),
+                        SnackBar(content: Text('stok_tidak_mencukupi_update'.tr)),
                       );
                       return;
                     }
 
-                    int jumlah = int.tryParse(jumlahStr) ?? 0;
-                    if (jumlah <= 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Jumlah harus lebih dari 0'),
-                        ),
-                      );
-                      return;
-                    }
-
-                    final produk = produkList
-                        .firstWhere((p) => p['id'] == selectedProdukId);
-
-                    if (penjualan == null && produk['stok'] < jumlah) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Stok produk tidak mencukupi'),
-                        ),
-                      );
-                      return;
-                    }
-
-                    double harga = produk['harga'];
-                    double total = harga * jumlah;
-                    String tanggal = DateTime.now().toIso8601String();
-
-                    if (penjualan == null) {
-                      // Tambah penjualan baru
-                      await DatabaseHelper.instance.insert('penjualan', {
-                        'produk_id': selectedProdukId,
+                    await DatabaseHelper.instance.update(
+                      'penjualan',
+                      {
+                        'id': penjualan['id'],
+                        'produk_id': produk['id'],
                         'jumlah': jumlah,
                         'total': total,
-                        'tanggal': tanggal,
-                      });
+                        'tanggal': penjualan['tanggal'],
+                      },
+                      'id = ?',
+                      [penjualan['id']],
+                    );
 
-                      // Kurangi stok produk
-                      await DatabaseHelper.instance.update(
-                        'produk',
-                        {'stok': produk['stok'] - jumlah},
-                        'id = ?',
-                        [produk['id']],
-                      );
-                    } else {
-                      // Update penjualan
-                      int jumlahLama = penjualan['jumlah'];
-                      int selisih = jumlah - jumlahLama;
+                    await DatabaseHelper.instance.update(
+                      'produk',
+                      {'stok': produk['stok'] - selisih},
+                      'id = ?',
+                      [produk['id']],
+                    );
+                  }
 
-                      if (produk['stok'] < selisih) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Stok tidak mencukupi untuk update'),
-                          ),
-                        );
-                        return;
-                      }
-
-                      await DatabaseHelper.instance.update(
-                        'penjualan',
-                        {
-                          'id': penjualan['id'],
-                          'produk_id': selectedProdukId,
-                          'jumlah': jumlah,
-                          'total': total,
-                          'tanggal': penjualan['tanggal'],
-                        },
-                        'id = ?',
-                        [penjualan['id']],
-                      );
-
-                      await DatabaseHelper.instance.update(
-                        'produk',
-                        {'stok': produk['stok'] - selisih},
-                        'id = ?',
-                        [produk['id']],
-                      );
-                    }
-
-                    if (mounted) {
-                      Navigator.pop(context, true);
-                      _loadData();
-                    }
-                  },
-                  icon: const Icon(Icons.save),
-                  label: const Text('Simpan'),
-                ),
-              ],
-            );
-          },
-        );
+                  if (mounted) {
+                    Navigator.pop(context, true);
+                    _loadData();
+                  }
+                },
+                icon: const Icon(Icons.save),
+                label: Text('simpan'.tr),
+              ),
+            ],
+          );
+        });
       },
     );
   }
 
   Future<void> _hapusPenjualan(Map<String, dynamic> penjualan) async {
-    final produk = produkList
-        .firstWhere((p) => p['id'] == penjualan['produk_id'], orElse: () => {});
+    final produk = produkList.firstWhere(
+        (p) => p['id'] == penjualan['produk_id'],
+        orElse: () => {});
     if (produk.isNotEmpty) {
       final newStok = (produk['stok'] as int) + (penjualan['jumlah'] as int);
       await DatabaseHelper.instance.update(
@@ -235,6 +319,8 @@ class _PenjualanScreenState extends State<PenjualanScreen>
   }
 
   Future<void> _exportPDF({bool bulanan = false}) async {
+    _showInterstitial();
+
     final pdf = pw.Document();
     final now = DateTime.now();
 
@@ -258,16 +344,22 @@ class _PenjualanScreenState extends State<PenjualanScreen>
           pw.Center(
               child: pw.Text(
                   bulanan
-                      ? "Laporan Penjualan Bulanan"
-                      : "Laporan Penjualan Harian",
+                      ? 'laporan_penjualan_bulanan'.tr
+                      : 'laporan_penjualan_harian'.tr,
                   style: pw.TextStyle(
                       fontSize: 20, fontWeight: pw.FontWeight.bold))),
           pw.SizedBox(height: 20),
           pw.Table.fromTextArray(
-            headers: ["Tanggal", "Produk", "Jumlah", "Total"],
+            headers: [
+              'tanggal'.tr,
+              'produk'.tr,
+              'jumlah'.tr,
+              'total'.tr
+            ],
             data: filtered
                 .map((p) => [
-                      DateFormat('dd/MM/yyyy').format(DateTime.parse(p['tanggal'])),
+                      DateFormat('dd/MM/yyyy')
+                          .format(DateTime.parse(p['tanggal'])),
                       p['produk_nama'] ?? '',
                       p['jumlah'].toString(),
                       "Rp ${p['total']}"
@@ -275,7 +367,7 @@ class _PenjualanScreenState extends State<PenjualanScreen>
                 .toList(),
           ),
           pw.SizedBox(height: 20),
-          pw.Text("Total Penjualan: Rp $totalAll",
+          pw.Text("${'total_penjualan'.tr}: Rp $totalAll",
               style:
                   pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
         ],
@@ -289,8 +381,8 @@ class _PenjualanScreenState extends State<PenjualanScreen>
 
     await Share.shareXFiles([XFile(file.path)],
         text: bulanan
-            ? 'Laporan Penjualan Bulanan'
-            : 'Laporan Penjualan Harian');
+            ? 'laporan_penjualan_bulanan'.tr
+            : 'laporan_penjualan_harian'.tr);
   }
 
   Widget _buildThumbnail(String? path) {
@@ -320,7 +412,7 @@ class _PenjualanScreenState extends State<PenjualanScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Penjualan'),
+        title: Text('penjualan'.tr),
         actions: [
           IconButton(
               onPressed: () => _exportPDF(bulanan: false),
@@ -334,67 +426,82 @@ class _PenjualanScreenState extends State<PenjualanScreen>
           ),
         ],
       ),
-      body: penjualanList.isEmpty
-          ? const Center(
-              child: Text(
-                'Belum ada penjualan',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-              ),
-            )
-          : ListView.builder(
-              itemCount: penjualanList.length,
-              itemBuilder: (context, index) {
-                final penjualan = penjualanList[index];
-                return Card(
-                  elevation: 3,
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.all(10),
-                    leading: _buildThumbnail(penjualan['gambar_path']),
-                    title: Text(
-                      penjualan['produk_nama'] ?? 'Produk tidak ditemukan',
+      body: Column(
+        children: [
+          Expanded(
+            child: penjualanList.isEmpty
+                ? Center(
+                    child: Text(
+                      'belum_ada_penjualan'.tr,
                       style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                          fontSize: 16, fontWeight: FontWeight.w500),
                     ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Jumlah: ${penjualan['jumlah']}'),
-                        Text(
-                          'Total: Rp ${penjualan['total'].toStringAsFixed(0)}',
-                          style: const TextStyle(color: Colors.green),
+                  )
+                : ListView.builder(
+                    itemCount: penjualanList.length,
+                    itemBuilder: (context, index) {
+                      final penjualan = penjualanList[index];
+                      return Card(
+                        elevation: 3,
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        Text(
-                          'Tanggal: ${penjualan['tanggal']}',
-                          style: const TextStyle(
-                              fontSize: 12, color: Colors.grey),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.all(10),
+                          leading: _buildThumbnail(penjualan['gambar_path']),
+                          title: Text(
+                            penjualan['produk_nama'] ??
+                                'produk_tidak_ditemukan'.tr,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${'jumlah'.tr}: ${penjualan['jumlah']}'),
+                              Text(
+                                '${'total'.tr}: Rp ${penjualan['total'].toStringAsFixed(0)}',
+                                style: const TextStyle(color: Colors.green),
+                              ),
+                              Text(
+                                '${'tanggal'.tr}: ${penjualan['tanggal']}',
+                                style: const TextStyle(
+                                    fontSize: 12, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                onPressed: () =>
+                                    _showPenjualanForm(penjualan: penjualan),
+                              ),
+                              IconButton(
+                                icon:
+                                    const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () => _hapusPenjualan(penjualan),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () =>
-                              _showPenjualanForm(penjualan: penjualan),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => _hapusPenjualan(penjualan),
-                        ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
-                );
-              },
+          ),
+          if (_bannerAd != null)
+            SizedBox(
+              width: _bannerAd!.size.width.toDouble(),
+              height: _bannerAd!.size.height.toDouble(),
+              child: AdWidget(ad: _bannerAd!),
             ),
+        ],
+      ),
     );
   }
 }

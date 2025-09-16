@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:get/get.dart';
 
 class InfoTokoScreen extends StatefulWidget {
   const InfoTokoScreen({super.key});
@@ -19,10 +21,68 @@ class _InfoTokoScreenState extends State<InfoTokoScreen> {
   Map<String, dynamic>? tokoData;
   bool _loading = true; // indikator loading awal
 
+  // ===== AdMob Banner & Interstitial =====
+  BannerAd? _bannerAd;
+  InterstitialAd? _interstitialAd;
+  bool _isInterstitialReady = false;
+
   @override
   void initState() {
     super.initState();
     _loadInfoToko();
+    _initBannerAd();
+    _loadInterstitialAd();
+  }
+
+  // ================ Banner =================
+  void _initBannerAd() {
+    _bannerAd = BannerAd(
+      adUnitId: 'ca-app-pub-6043960664919055~8946073109',
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (ad) => setState(() {}),
+        onAdFailedToLoad: (ad, err) {
+          ad.dispose();
+          debugPrint('Banner gagal dimuat: $err');
+        },
+      ),
+    )..load();
+  }
+
+  // ================ Interstitial ================
+  void _loadInterstitialAd() {
+    InterstitialAd.load(
+      adUnitId: 'ca-app-pub-6043960664919055/4042883172',
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _interstitialAd = ad;
+          _isInterstitialReady = true;
+        },
+        onAdFailedToLoad: (err) {
+          debugPrint('Interstitial gagal dimuat: $err');
+          _isInterstitialReady = false;
+        },
+      ),
+    );
+  }
+
+  void _showInterstitial() {
+    if (_isInterstitialReady && _interstitialAd != null) {
+      _interstitialAd!.fullScreenContentCallback =
+          FullScreenContentCallback(onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _loadInterstitialAd(); // reload untuk penggunaan berikutnya
+      }, onAdFailedToShowFullScreenContent: (ad, err) {
+        ad.dispose();
+        _loadInterstitialAd();
+      });
+
+      _interstitialAd!.show();
+      _interstitialAd = null;
+      _isInterstitialReady = false;
+    }
   }
 
   Future<void> _loadInfoToko() async {
@@ -64,9 +124,12 @@ class _InfoTokoScreenState extends State<InfoTokoScreen> {
       tokoData = {'id': tokoData!['id'], ...row};
     }
 
+    // Tampilkan interstitial saat menyimpan info toko
+    _showInterstitial();
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Info Toko berhasil disimpan')),
+        SnackBar(content: Text('info_toko_berhasil_disimpan'.tr)),
       );
       setState(() {});
     }
@@ -76,70 +139,96 @@ class _InfoTokoScreenState extends State<InfoTokoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Info Toko'),
+        title: Text('info_toko'.tr),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Form(
-                key: _formKey,
-                child: ListView(
-                  children: [
-                    TextFormField(
-                      controller: namaController,
-                      decoration: const InputDecoration(
-                        labelText: 'Nama Toko',
-                        border: OutlineInputBorder(),
+          : Column(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Form(
+                      key: _formKey,
+                      child: ListView(
+                        children: [
+                          TextFormField(
+                            controller: namaController,
+                            decoration: InputDecoration(
+                              labelText: 'nama_toko'.tr,
+                              border: const OutlineInputBorder(),
+                            ),
+                            validator: (value) => value == null || value.isEmpty
+                                ? 'nama_toko_wajib_diisi'.tr
+                                : null,
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            controller: alamatController,
+                            decoration: InputDecoration(
+                              labelText: 'alamat'.tr,
+                              border: const OutlineInputBorder(),
+                            ),
+                            maxLines: 2,
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            controller: teleponController,
+                            decoration: InputDecoration(
+                              labelText: 'telepon'.tr,
+                              border: const OutlineInputBorder(),
+                            ),
+                            keyboardType: TextInputType.phone,
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            controller: emailController,
+                            decoration: InputDecoration(
+                              labelText: 'email'.tr,
+                              border: const OutlineInputBorder(),
+                            ),
+                            keyboardType: TextInputType.emailAddress,
+                            validator: (value) {
+                              if (value != null && value.isNotEmpty) {
+                                final regex =
+                                    RegExp(r'^[^@]+@[^@]+\.[^@]+');
+                                if (!regex.hasMatch(value)) {
+                                  return 'format_email_tidak_valid'.tr;
+                                }
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          ElevatedButton(
+                            onPressed: _saveInfoToko,
+                            child: Text('simpan'.tr),
+                          ),
+                        ],
                       ),
-                      validator: (value) =>
-                          value == null || value.isEmpty ? 'Nama toko wajib diisi' : null,
                     ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: alamatController,
-                      decoration: const InputDecoration(
-                        labelText: 'Alamat',
-                        border: OutlineInputBorder(),
-                      ),
-                      maxLines: 2,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: teleponController,
-                      decoration: const InputDecoration(
-                        labelText: 'Telepon',
-                        border: OutlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.phone,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: emailController,
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                        border: OutlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.emailAddress,
-                      validator: (value) {
-                        if (value != null && value.isNotEmpty) {
-                          final regex = RegExp(r'^[^@]+@[^@]+\.[^@]+');
-                          if (!regex.hasMatch(value)) {
-                            return 'Format email tidak valid';
-                          }
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: _saveInfoToko,
-                      child: const Text('Simpan'),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+                // 🔽 Banner Ad
+                if (_bannerAd != null)
+                  SizedBox(
+                    width: _bannerAd!.size.width.toDouble(),
+                    height: _bannerAd!.size.height.toDouble(),
+                    child: AdWidget(ad: _bannerAd!),
+                  ),
+              ],
             ),
     );
+  }
+
+  @override
+  void dispose() {
+    namaController.dispose();
+    alamatController.dispose();
+    teleponController.dispose();
+    emailController.dispose();
+    _bannerAd?.dispose();
+    _interstitialAd?.dispose();
+    super.dispose();
   }
 }

@@ -1,11 +1,13 @@
 import 'dart:io';
-import 'dart:typed_data'; // untuk Uint8List
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:get/get.dart';
 import '../db/database_helper.dart';
 
 class HutangPiutangScreen extends StatefulWidget {
@@ -22,12 +24,81 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
   late TabController _tabController;
   final ImagePicker _picker = ImagePicker();
 
+  // ===== AdMob Banner & Interstitial =====
+  late BannerAd _bannerAd;
+  bool _bannerLoaded = false;
+
+  InterstitialAd? _interstitialAd;
+  int _interstitialLoadCount = 0; // kontrol frekuensi
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadData();
+    _loadBannerAd();
+    _loadInterstitial();
   }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _bannerAd.dispose();
+    _interstitialAd?.dispose();
+    super.dispose();
+  }
+
+  // ================= AdMob ==================
+  void _loadBannerAd() {
+    _bannerAd = BannerAd(
+      adUnitId: 'ca-app-pub-6043960664919055~8946073109',
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          setState(() {
+            _bannerLoaded = true;
+          });
+        },
+        onAdFailedToLoad: (_, err) {
+          _bannerLoaded = false;
+        },
+      ),
+    )..load();
+  }
+
+  void _loadInterstitial() {
+    InterstitialAd.load(
+      adUnitId: 'ca-app-pub-6043960664919055/4042883172',
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _interstitialAd = ad;
+        },
+        onAdFailedToLoad: (_) {
+          _interstitialAd = null;
+        },
+      ),
+    );
+  }
+
+  void _showInterstitial() {
+    if (_interstitialAd != null && _interstitialLoadCount == 0) {
+      _interstitialAd!.fullScreenContentCallback =
+          FullScreenContentCallback(onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _loadInterstitial();
+      }, onAdFailedToShowFullScreenContent: (ad, err) {
+        ad.dispose();
+        _loadInterstitial();
+      });
+
+      _interstitialAd!.show();
+      _interstitialLoadCount++;
+    }
+  }
+
+  // ==========================================
 
   Future<void> _loadData() async {
     setState(() => _loading = true);
@@ -71,8 +142,8 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
       builder: (_) => StatefulBuilder(
         builder: (context, setStateDialog) => AlertDialog(
           title: Text(item == null
-              ? "Tambah Hutang/Piutang"
-              : "Edit Hutang/Piutang"),
+              ? 'tambah_hutang_piutang'.tr
+              : 'edit'.tr + " ${'hutang_piutang'.tr}"),
           content: SingleChildScrollView(
             child: Form(
               key: formKey,
@@ -80,52 +151,54 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
                 children: [
                   DropdownButtonFormField<String>(
                     value: tipeCtrl.text,
-                    decoration: const InputDecoration(labelText: "Tipe"),
-                    items: const [
+                    decoration: InputDecoration(labelText: 'hutang'.tr),
+                    items: [
                       DropdownMenuItem(
                           value: "hutang",
-                          child: Text("Hutang (toko ke supplier)")),
+                          child: Text("hutang".tr + " (toko → supplier)")),
                       DropdownMenuItem(
                           value: "piutang",
-                          child: Text("Piutang (pelanggan ke toko)")),
+                          child: Text("piutang".tr + " (pelanggan → toko)")),
                     ],
                     onChanged: (val) => tipeCtrl.text = val!,
                   ),
                   TextFormField(
                     controller: namaCtrl,
-                    decoration: const InputDecoration(
-                        labelText: "Nama Supplier/Pelanggan"),
+                    decoration: InputDecoration(
+                        labelText: 'nama'.tr + " ${'supplier/pelanggan'.tr}"),
                     validator: (v) =>
-                        v == null || v.isEmpty ? "Wajib diisi" : null,
+                        v == null || v.isEmpty ? 'wajib_diisi'.tr : null,
                   ),
                   TextFormField(
                     controller: jumlahCtrl,
-                    decoration: const InputDecoration(labelText: "Jumlah"),
+                    decoration:
+                        InputDecoration(labelText: 'jumlah'.tr),
                     keyboardType: TextInputType.number,
                     validator: (v) =>
-                        v == null || v.isEmpty ? "Wajib diisi" : null,
+                        v == null || v.isEmpty ? 'wajib_diisi'.tr : null,
                   ),
                   TextFormField(
                     controller: tanggalCtrl,
-                    decoration: const InputDecoration(
-                        labelText: "Tanggal (YYYY-MM-DD)"),
+                    decoration:
+                        InputDecoration(labelText: 'tanggal'.tr),
                   ),
                   TextFormField(
                     controller: jatuhTempoCtrl,
                     decoration:
-                        const InputDecoration(labelText: "Jatuh Tempo (opsional)"),
+                        InputDecoration(labelText: 'jatuh_tempo'.tr),
                   ),
                   TextFormField(
                     controller: keteranganCtrl,
-                    decoration: const InputDecoration(labelText: "Keterangan"),
+                    decoration: InputDecoration(labelText: 'keterangan'.tr),
                   ),
                   DropdownButtonFormField<String>(
                     value: status,
-                    decoration: const InputDecoration(labelText: "Status"),
-                    items: const [
+                    decoration: InputDecoration(labelText: 'status'.tr),
+                    items: [
                       DropdownMenuItem(
-                          value: "belum_lunas", child: Text("Belum Lunas")),
-                      DropdownMenuItem(value: "lunas", child: Text("Lunas")),
+                          value: "belum_lunas", child: Text('belum_lunas'.tr)),
+                      DropdownMenuItem(
+                          value: "lunas", child: Text('lunas'.tr)),
                     ],
                     onChanged: (val) => status = val!,
                   ),
@@ -136,14 +209,14 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
                         onPressed: () => _pickImage(ImageSource.camera)
                             .then((_) => setStateDialog(() {})),
                         icon: const Icon(Icons.camera_alt),
-                        label: const Text("Kamera"),
+                        label: Text('kamera'.tr),
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton.icon(
                         onPressed: () => _pickImage(ImageSource.gallery)
                             .then((_) => setStateDialog(() {})),
                         icon: const Icon(Icons.photo),
-                        label: const Text("Galeri"),
+                        label: Text('galeri'.tr),
                       ),
                     ],
                   ),
@@ -161,7 +234,7 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text("Batal")),
+                child: Text('batal'.tr)),
             ElevatedButton(
               onPressed: () async {
                 if (formKey.currentState!.validate()) {
@@ -195,9 +268,12 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
 
                   Navigator.pop(context);
                   _loadData();
+
+                  // tampilkan interstitial setelah save
+                  _showInterstitial();
                 }
               },
-              child: const Text("Simpan"),
+              child: Text('simpan'.tr),
             ),
           ],
         ),
@@ -216,7 +292,6 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
     _loadData();
   }
 
-  /// 🔍 Preview full image dengan zoom
   void _openFullImage(String path) {
     Navigator.push(
       context,
@@ -237,7 +312,7 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
     );
   }
 
-  /// 📤 Share 1 item sebagai PDF
+  // 📤 Share PDF per item
   Future<void> _shareAsPdf(Map<String, dynamic> item) async {
     try {
       final pdf = pw.Document();
@@ -245,45 +320,41 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
       Uint8List? imageBytes;
       if (item['foto'] != null) {
         final f = File(item['foto']);
-        if (f.existsSync()) {
-          imageBytes = await f.readAsBytes();
-        }
+        if (f.existsSync()) imageBytes = await f.readAsBytes();
       }
 
-      final pw.ImageProvider? imageProvider =
+      final imageProvider =
           imageBytes != null ? pw.MemoryImage(imageBytes) : null;
 
-      pdf.addPage(
-        pw.Page(
-          build: (pw.Context ctx) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text("Hutang/Piutang",
-                  style: pw.TextStyle(
-                      fontSize: 20, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 16),
-              pw.Text("Tipe: ${item['tipe']}"),
-              pw.Text("Nama: ${item['nama']}"),
-              pw.Text("Jumlah: Rp${item['jumlah']}"),
-              pw.Text("Tanggal: ${item['tanggal']}"),
-              pw.Text("Jatuh Tempo: ${item['jatuh_tempo'] ?? '-'}"),
-              pw.Text("Status: ${item['status']}"),
-              pw.Text("Keterangan: ${item['keterangan'] ?? '-'}"),
-              if (imageProvider != null) ...[
-                pw.SizedBox(height: 20),
-                pw.Image(imageProvider, width: 200),
-              ],
+      pdf.addPage(pw.Page(
+        build: (pw.Context ctx) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text('hutang_piutang'.tr,
+                style: pw.TextStyle(
+                    fontSize: 20, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 16),
+            pw.Text("${'hutang'.tr}: ${item['tipe']}"),
+            pw.Text("${'nama'.tr}: ${item['nama']}"),
+            pw.Text("${'jumlah'.tr}: Rp${item['jumlah']}"),
+            pw.Text("${'tanggal'.tr}: ${item['tanggal']}"),
+            pw.Text("${'jatuh_tempo'.tr}: ${item['jatuh_tempo'] ?? '-'}"),
+            pw.Text("${'status'.tr}: ${item['status']}"),
+            pw.Text("${'keterangan'.tr}: ${item['keterangan'] ?? '-'}"),
+            if (imageProvider != null) ...[
+              pw.SizedBox(height: 20),
+              pw.Image(imageProvider, width: 200),
             ],
-          ),
+          ],
         ),
-      );
+      ));
 
       final dir = await getTemporaryDirectory();
       final file = File("${dir.path}/hutang_piutang_${item['id']}.pdf");
       await file.writeAsBytes(await pdf.save());
 
       await Share.shareXFiles([XFile(file.path)],
-          text: "Data Hutang/Piutang");
+          text: "Data ${'hutang_piutang'.tr}");
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Gagal export/share PDF: $e")),
@@ -291,31 +362,51 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
     }
   }
 
-  /// 📤 Share seluruh data (hutang/piutang) sebagai 1 PDF
+  // 📤 Share PDF seluruh data
   Future<void> _shareAllAsPdf() async {
     try {
+      if (_data.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('belum_ada_data'.tr)));
+        return;
+      }
+
       final pdf = pw.Document();
 
       pdf.addPage(
         pw.MultiPage(
           build: (pw.Context ctx) => [
-            pw.Text("Laporan Hutang & Piutang",
+            pw.Text('laporan_hutang_piutang'.tr,
                 style: pw.TextStyle(
                     fontSize: 22, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 20),
-            ..._data.map((item) => pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                        "${item['tipe'].toUpperCase()} - ${item['nama']} (Rp${item['jumlah']})",
-                        style: pw.TextStyle(fontSize: 14)),
-                    pw.Text("Tanggal: ${item['tanggal']}"),
-                    pw.Text("Jatuh Tempo: ${item['jatuh_tempo'] ?? '-'}"),
-                    pw.Text("Status: ${item['status']}"),
-                    pw.Text("Keterangan: ${item['keterangan'] ?? '-'}"),
-                    pw.Divider(),
+            ..._data.map((item) {
+              pw.ImageProvider? imageProvider;
+              if (item['foto'] != null) {
+                final f = File(item['foto']);
+                if (f.existsSync()) {
+                  imageProvider = pw.MemoryImage(f.readAsBytesSync());
+                }
+              }
+              return pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                      "${item['tipe'].toUpperCase()} - ${item['nama']} (Rp${item['jumlah']})",
+                      style: pw.TextStyle(fontSize: 14)),
+                  pw.Text("${'tanggal'.tr}: ${item['tanggal']}"),
+                  pw.Text("${'jatuh_tempo'.tr}: ${item['jatuh_tempo'] ?? '-'}"),
+                  pw.Text("${'status'.tr}: ${item['status']}"),
+                  pw.Text("${'keterangan'.tr}: ${item['keterangan'] ?? '-'}"),
+                  if (imageProvider != null) ...[
+                    pw.SizedBox(height: 10),
+                    pw.Image(imageProvider, width: 200),
                   ],
-                )),
+                  pw.Divider(),
+                  pw.SizedBox(height: 10),
+                ],
+              );
+            }).toList(),
           ],
         ),
       );
@@ -325,7 +416,7 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
       await file.writeAsBytes(await pdf.save());
 
       await Share.shareXFiles([XFile(file.path)],
-          text: "Laporan seluruh Hutang & Piutang");
+          text: 'laporan_hutang_piutang'.tr);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Gagal export semua: $e")),
@@ -336,9 +427,7 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
   Widget _buildList(String tipe) {
     final list = _data.where((e) => e['tipe'] == tipe).toList();
 
-    if (list.isEmpty) {
-      return const Center(child: Text("Belum ada data"));
-    }
+    if (list.isEmpty) return Center(child: Text('belum_ada_data'.tr));
 
     return ListView.builder(
       itemCount: list.length,
@@ -346,7 +435,8 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
         final item = list[i];
         final bool isLunas = item['status'] == 'lunas';
         final Color badgeColor = isLunas ? Colors.green : Colors.red;
-        final String badgeText = isLunas ? "Lunas ✔" : "Belum Lunas ✖";
+        final String badgeText =
+            isLunas ? 'lunas'.tr + " ✔" : 'belum_lunas'.tr + " ✖";
 
         return Card(
           child: Padding(
@@ -375,7 +465,7 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
                         ),
                   title: Text("${item['nama']} - Rp${item['jumlah']}"),
                   subtitle: Text(
-                    "Tanggal: ${item['tanggal']} | Jatuh Tempo: ${item['jatuh_tempo'] ?? '-'}",
+                    "${'tanggal'.tr}: ${item['tanggal']} | ${'jatuh_tempo'.tr}: ${item['jatuh_tempo'] ?? '-'}",
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -383,14 +473,14 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
                       IconButton(
                         icon: const Icon(Icons.picture_as_pdf,
                             color: Colors.blue),
-                        tooltip: "Export/Share PDF",
+                        tooltip: 'export_pdf'.tr,
                         onPressed: () => _shareAsPdf(item),
                       ),
                       if (!isLunas)
                         IconButton(
                           icon: const Icon(Icons.check_circle,
                               color: Colors.green),
-                          tooltip: "Tandai Lunas",
+                          tooltip: 'lunas'.tr,
                           onPressed: () => _tandaiLunas(item),
                         ),
                       IconButton(
@@ -438,7 +528,7 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text("Hutang & Piutang"),
+          title: Text('laporan_hutang_piutang'.tr),
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(48),
             child: Container(
@@ -451,9 +541,9 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
                 ),
                 labelColor: Colors.white,
                 unselectedLabelColor: Colors.white70,
-                tabs: const [
-                  Tab(text: "Hutang"),
-                  Tab(text: "Piutang"),
+                tabs: [
+                  Tab(text: 'hutang'.tr),
+                  Tab(text: 'piutang'.tr),
                 ],
               ),
             ),
@@ -461,20 +551,31 @@ class _HutangPiutangScreenState extends State<HutangPiutangScreen>
           actions: [
             IconButton(
               icon: const Icon(Icons.picture_as_pdf),
-              tooltip: "Export semua Hutang & Piutang",
+              tooltip: 'export_pdf'.tr,
               onPressed: _shareAllAsPdf,
             ),
           ],
         ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildList('hutang'),
-                  _buildList('piutang'),
-                ],
+        body: Column(
+          children: [
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildList('hutang'),
+                        _buildList('piutang'),
+                      ],
+                    ),
+            ),
+            if (_bannerLoaded)
+              SizedBox(
+                height: _bannerAd.size.height.toDouble(),
+                child: AdWidget(ad: _bannerAd),
               ),
+          ],
+        ),
         floatingActionButton: AnimatedBuilder(
           animation: _tabController,
           builder: (context, _) {

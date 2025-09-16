@@ -6,10 +6,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:archive/archive.dart';
 import 'package:file_saver/file_saver.dart';
+import 'package:get/get.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+
 import '../db/database_helper.dart';
+import 'lang.dart'; // <-- pastikan file lang.dart berisi map terjemahan
 
 class SettingsScreen extends StatefulWidget {
-  final VoidCallback? onDatabaseChanged; // callback untuk update UI setelah restore/reset
+  final VoidCallback? onDatabaseChanged;
   const SettingsScreen({super.key, this.onDatabaseChanged});
 
   @override
@@ -20,10 +24,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _currency;
   String? _language;
 
+  BannerAd? _bannerAd;
+  InterstitialAd? _interstitialAd;
+
   @override
   void initState() {
     super.initState();
     _loadDefaults();
+    _loadBannerAd();
+    _loadInterstitialAd();
+  }
+
+  @override
+  void dispose() {
+    _bannerAd?.dispose();
+    _interstitialAd?.dispose();
+    super.dispose();
   }
 
   Future<void> _loadDefaults() async {
@@ -35,6 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _currency = map['currency'] ?? 'IDR';
       _language = map['language'] ?? 'id';
+      Get.updateLocale(Locale(_language ?? 'id'));
     });
   }
 
@@ -45,10 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     if (existing.isEmpty) {
-      await DatabaseHelper.instance.insert('pengaturan', {
-        'key': key,
-        'value': value,
-      });
+      await DatabaseHelper.instance.insert('pengaturan', {'key': key, 'value': value});
     } else {
       await DatabaseHelper.instance.update(
         'pengaturan',
@@ -56,6 +70,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'id = ?',
         [existing.first['id']],
       );
+    }
+
+    // Jika ganti bahasa, update GetX
+    if (key == 'language') {
+      Get.updateLocale(Locale(value));
+    }
+  }
+
+  /// ========== ADS ==========
+  void _loadBannerAd() {
+    _bannerAd = BannerAd(
+      adUnitId: Platform.isAndroid
+          ? 'ca-app-pub-6043960664919055~8946073109'
+          : '',
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdFailedToLoad: (ad, error) {
+          debugPrint("Banner gagal: $error");
+          ad.dispose();
+        },
+      ),
+    )..load();
+  }
+
+  void _loadInterstitialAd() {
+    InterstitialAd.load(
+      adUnitId: Platform.isAndroid
+          ? 'ca-app-pub-6043960664919055/4042883172'
+          : '',
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) => _interstitialAd = ad,
+        onAdFailedToLoad: (error) {
+          debugPrint("Interstitial gagal: $error");
+          _interstitialAd = null;
+        },
+      ),
+    );
+  }
+
+  void _showInterstitial() {
+    if (_interstitialAd != null) {
+      _interstitialAd!.show();
+      _interstitialAd = null;
+      _loadInterstitialAd();
     }
   }
 
@@ -69,13 +129,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       final archive = Archive();
 
-      // Backup database
       if (await File(dbPath).exists()) {
         final dbBytes = await File(dbPath).readAsBytes();
         archive.addFile(ArchiveFile(p.basename(dbPath), dbBytes.length, dbBytes));
       }
 
-      // Backup folder images
       if (await imageDir.exists()) {
         for (var file in imageDir.listSync(recursive: true)) {
           if (file is File) {
@@ -104,14 +162,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("✅ Backup berhasil: $backupName\n📂 Lokasi: $savedPath"),
+          content: Text("${'backup_berhasil'.tr}: $backupName\n📂 ${'lokasi'.tr}: $savedPath"),
           duration: const Duration(seconds: 5),
         ),
       );
+
+      _showInterstitial();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("❌ Gagal backup: $e")),
+        SnackBar(content: Text("${'gagal_backup'.tr}: $e")),
       );
     }
   }
@@ -155,16 +215,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await dbHelper.resetDatabaseInstance();
       await dbHelper.database;
 
-      widget.onDatabaseChanged?.call(); // auto-refresh UI
+      widget.onDatabaseChanged?.call();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("✅ Restore database berhasil")),
+        SnackBar(content: Text('restore_berhasil'.tr)),
       );
+
+      _showInterstitial();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("❌ Gagal restore: $e")),
+        SnackBar(content: Text("${'gagal_restore'.tr}: $e")),
       );
     }
   }
@@ -175,23 +237,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Konfirmasi Reset"),
+        title: Text('konfirmasi_reset'.tr),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text("Ketik 'reset' untuk menghapus semua data."),
+            Text('ketik_reset_untuk_hapus'.tr),
             TextField(controller: controller),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Batal"),
+            child: Text('batal'.tr),
           ),
           TextButton(
             onPressed: () =>
                 Navigator.pop(ctx, controller.text.toLowerCase() == "reset"),
-            child: const Text("OK"),
+            child: Text('ok'.tr),
           ),
         ],
       ),
@@ -211,16 +273,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await dbHelper.resetDatabaseInstance();
         await dbHelper.database;
 
-        widget.onDatabaseChanged?.call(); // auto-refresh UI
+        widget.onDatabaseChanged?.call();
 
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("✅ Database berhasil direset")),
+          SnackBar(content: Text('reset_berhasil'.tr)),
         );
+
+        _showInterstitial();
       } catch (e) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("❌ Gagal reset: $e")),
+          SnackBar(content: Text("${'gagal_reset'.tr}: $e")),
         );
       }
     }
@@ -229,73 +293,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Pengaturan")),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      appBar: AppBar(title: Text('pengaturan'.tr)),
+      body: Column(
         children: [
-          ListTile(
-            title: const Text("Mata Uang"),
-            subtitle: Text(_currency ?? ''),
-            trailing: DropdownButton<String>(
-              value: _currency,
-              items: const [
-                DropdownMenuItem(value: 'IDR', child: Text("Rupiah (IDR)")),
-                DropdownMenuItem(value: 'USD', child: Text("Dollar (USD)")),
-                DropdownMenuItem(value: 'EUR', child: Text("Euro (EUR)")),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                ListTile(
+                  title: Text('mata_uang'.tr),
+                  subtitle: Text(_currency ?? ''),
+                  trailing: DropdownButton<String>(
+                    value: _currency,
+                    items: [
+                      DropdownMenuItem(value: 'IDR', child: Text("Rupiah (IDR)")),
+                      DropdownMenuItem(value: 'USD', child: Text("Dollar (USD)")),
+                      DropdownMenuItem(value: 'EUR', child: Text("Euro (EUR)")),
+                    ],
+                    onChanged: (val) async {
+                      if (val != null) {
+                        setState(() => _currency = val);
+                        await _saveSetting('currency', val);
+                        widget.onDatabaseChanged?.call();
+                      }
+                    },
+                  ),
+                ),
+                const Divider(),
+                ListTile(
+                  title: Text('bahasa'.tr),
+                  subtitle: Text(_language == 'id' ? "Indonesia" : "English"),
+                  trailing: DropdownButton<String>(
+                    value: _language,
+                    items: [
+                      DropdownMenuItem(value: 'id', child: Text("Indonesia")),
+                      DropdownMenuItem(value: 'en', child: Text("English")),
+                    ],
+                    onChanged: (val) async {
+                      if (val != null) {
+                        setState(() => _language = val);
+                        await _saveSetting('language', val);
+                      }
+                    },
+                  ),
+                ),
+                const Divider(),
+                ListTile(
+                  title: Text('manajemen_database'.tr),
+                  subtitle:
+                      Text("${'backup'.tr}, ${'restore'.tr}, atau ${'reset'.tr}"),
+                ),
+                OverflowBar(
+                  alignment: MainAxisAlignment.start,
+                  children: [
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.backup),
+                      label: Text('backup'.tr),
+                      onPressed: _backupDatabase,
+                    ),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.restore),
+                      label: Text('restore'.tr),
+                      onPressed: _restoreDatabase,
+                    ),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.delete_forever),
+                      label: Text('reset'.tr),
+                      onPressed: _resetDatabase,
+                    ),
+                  ],
+                ),
               ],
-              onChanged: (val) async {
-                if (val != null) {
-                  setState(() => _currency = val);
-                  await _saveSetting('currency', val);
-                  widget.onDatabaseChanged?.call();
-                }
-              },
             ),
           ),
-          const Divider(),
-          ListTile(
-            title: const Text("Bahasa"),
-            subtitle: Text(_language == 'id' ? "Indonesia" : "English"),
-            trailing: DropdownButton<String>(
-              value: _language,
-              items: const [
-                DropdownMenuItem(value: 'id', child: Text("Indonesia")),
-                DropdownMenuItem(value: 'en', child: Text("English")),
-              ],
-              onChanged: (val) async {
-                if (val != null) {
-                  setState(() => _language = val);
-                  await _saveSetting('language', val);
-                  widget.onDatabaseChanged?.call();
-                }
-              },
+          if (_bannerAd != null)
+            Container(
+              color: Colors.transparent,
+              height: _bannerAd!.size.height.toDouble(),
+              width: _bannerAd!.size.width.toDouble(),
+              child: AdWidget(ad: _bannerAd!),
             ),
-          ),
-          const Divider(),
-          const ListTile(
-            title: Text("Manajemen Database"),
-            subtitle: Text("Backup, restore, atau reset database"),
-          ),
-          ButtonBar(
-            alignment: MainAxisAlignment.start,
-            children: [
-              ElevatedButton.icon(
-                icon: const Icon(Icons.backup),
-                label: const Text("Backup"),
-                onPressed: _backupDatabase,
-              ),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.restore),
-                label: const Text("Restore"),
-                onPressed: _restoreDatabase,
-              ),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.delete_forever),
-                label: const Text("Reset"),
-                onPressed: _resetDatabase,
-              ),
-            ],
-          ),
         ],
       ),
     );

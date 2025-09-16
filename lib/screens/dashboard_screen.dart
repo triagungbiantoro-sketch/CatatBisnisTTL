@@ -8,6 +8,8 @@ import 'settings_screen.dart';
 import 'about_screen.dart';
 import 'hutangpiutang_screen.dart';
 import '../db/database_helper.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:get/get.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -23,56 +25,128 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _stokHabis = 0;
   double _totalPenjualanHariIni = 0;
 
-  final Color tomato = const Color(0xFFFF6347); // 🎨 Warna Tomato
+  final Color tomato = const Color(0xFFFF6347);
+
+  BannerAd? _bannerAd;
+  InterstitialAd? _interstitialAd;
+  bool _isInterstitialReady = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _initBannerAd();
+    _loadInterstitialAd();
+  }
+
+  @override
+  void dispose() {
+    _bannerAd?.dispose();
+    _interstitialAd?.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
-    final tokoList = await DatabaseHelper.instance.queryAll('info_toko');
-    final produkList = await DatabaseHelper.instance.queryAll('produk');
-    final penjualanList = await DatabaseHelper.instance.queryAll('penjualan');
+    try {
+      final tokoList = await DatabaseHelper.instance.queryAll('info_toko');
+      final produkList = await DatabaseHelper.instance.queryAll('produk');
+      final penjualanList = await DatabaseHelper.instance.queryAll('penjualan');
 
-    final today = DateTime.now();
-    double totalPenjualan = 0;
+      final today = DateTime.now();
+      double totalPenjualan = 0;
 
-    for (var s in penjualanList) {
-      final tglString = s['tanggal']?.toString();
-      final tgl = DateTime.tryParse(tglString ?? "");
+      for (var s in penjualanList) {
+        final tglString = s['tanggal']?.toString();
+        final tgl = DateTime.tryParse(tglString ?? "");
 
-      if (tgl != null &&
-          tgl.year == today.year &&
-          tgl.month == today.month &&
-          tgl.day == today.day) {
-        final totalValue = s['total'];
-        if (totalValue is int) {
-          totalPenjualan += totalValue.toDouble();
-        } else if (totalValue is double) {
-          totalPenjualan += totalValue;
-        } else if (totalValue is String) {
-          totalPenjualan += double.tryParse(totalValue) ?? 0;
+        if (tgl != null &&
+            tgl.year == today.year &&
+            tgl.month == today.month &&
+            tgl.day == today.day) {
+          final totalValue = s['total'];
+          if (totalValue is int) {
+            totalPenjualan += totalValue.toDouble();
+          } else if (totalValue is double) {
+            totalPenjualan += totalValue;
+          } else if (totalValue is String) {
+            totalPenjualan += double.tryParse(totalValue) ?? 0;
+          }
         }
       }
-    }
 
-    setState(() {
-      _namaToko = tokoList.isNotEmpty ? (tokoList.first['nama_toko'] ?? "-") : "-";
-      _logoPath = tokoList.isNotEmpty ? tokoList.first['logo'] : null;
-      _totalProduk = produkList.isNotEmpty ? produkList.length : 0;
-      _stokHabis =
-          produkList.where((p) => ((p['stok'] ?? 0) as int) <= 0).length;
-      _totalPenjualanHariIni = totalPenjualan;
-    });
+      setState(() {
+        _namaToko =
+            tokoList.isNotEmpty ? (tokoList.first['nama_toko'] ?? "-") : "-";
+        _logoPath = tokoList.isNotEmpty ? tokoList.first['logo'] : null;
+        _totalProduk = produkList.isNotEmpty ? produkList.length : 0;
+        _stokHabis =
+            produkList.where((p) => ((p['stok'] ?? 0) as int) <= 0).length;
+        _totalPenjualanHariIni = totalPenjualan;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("gagal_load_data".tr + ": $e")),
+      );
+    }
+  }
+
+  // Banner Ad
+  void _initBannerAd() {
+    _bannerAd = BannerAd(
+      adUnitId: 'ca-app-pub-6043960664919055~8946073109',
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (ad) => setState(() {}),
+        onAdFailedToLoad: (ad, err) {
+          ad.dispose();
+          debugPrint('Banner gagal dimuat: $err');
+        },
+      ),
+    )..load();
+  }
+
+  // Interstitial
+  void _loadInterstitialAd() {
+    InterstitialAd.load(
+      adUnitId: 'ca-app-pub-6043960664919055/4042883172',
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _interstitialAd = ad;
+          _isInterstitialReady = true;
+        },
+        onAdFailedToLoad: (err) {
+          debugPrint('Interstitial gagal dimuat: $err');
+          _isInterstitialReady = false;
+        },
+      ),
+    );
+  }
+
+  void _showInterstitial() {
+    if (_isInterstitialReady && _interstitialAd != null) {
+      _interstitialAd!.fullScreenContentCallback =
+          FullScreenContentCallback(onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _loadInterstitialAd();
+      }, onAdFailedToShowFullScreenContent: (ad, err) {
+        ad.dispose();
+        _loadInterstitialAd();
+      });
+
+      _interstitialAd!.show();
+      _interstitialAd = null;
+      _isInterstitialReady = false;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final List<_DashboardMenu> menuItems = [
       _DashboardMenu(
-        title: 'Produk',
+        title: 'produk'.tr,
         icon: Icons.storefront,
         onTap: () {
           Navigator.push(
@@ -82,9 +156,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
       ),
       _DashboardMenu(
-        title: 'Penjualan',
+        title: 'penjualan'.tr,
         icon: Icons.point_of_sale,
         onTap: () {
+          _showInterstitial();
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const PenjualanScreen()),
@@ -92,7 +167,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
       ),
       _DashboardMenu(
-        title: 'Info Toko',
+        title: 'info_toko'.tr,
         icon: Icons.info_outline,
         onTap: () {
           Navigator.push(
@@ -102,7 +177,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
       ),
       _DashboardMenu(
-        title: 'Laporan',
+        title: 'laporan'.tr,
         icon: Icons.bar_chart,
         onTap: () {
           Navigator.push(
@@ -111,9 +186,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ).then((_) => _loadData());
         },
       ),
-     _DashboardMenu(
-        title: 'Hutang Piutang',
-        icon: Icons.account_balance_wallet, // ganti ikon lebih cocok
+      _DashboardMenu(
+        title: 'hutang_piutang'.tr,
+        icon: Icons.account_balance_wallet,
         onTap: () {
           Navigator.push(
             context,
@@ -122,7 +197,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
       ),
       _DashboardMenu(
-        title: 'Pengaturan',
+        title: 'pengaturan'.tr,
         icon: Icons.settings,
         onTap: () {
           Navigator.push(
@@ -134,7 +209,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
       ),
       _DashboardMenu(
-        title: 'Tentang',
+        title: 'tentang'.tr,
         icon: Icons.info_outline,
         onTap: () {
           Navigator.push(
@@ -176,63 +251,69 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadData,
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              // KPI Section
-              Row(
-                children: [
-                  _buildKpiCard(
-                      'Total Produk', _totalProduk.toString(),
-                      Icons.store, tomato),
-                  const SizedBox(width: 12),
-                  _buildKpiCard(
-                      'Stok Habis', _stokHabis.toString(),
-                      Icons.warning_amber, Colors.redAccent),
-                  const SizedBox(width: 12),
-                ],
-              ),
-              Row(
-                children: [
-                  _buildKpiCard(
-                      'Penjualan Hari Ini',
-                      'Rp ${_totalPenjualanHariIni.toStringAsFixed(0)}',
-                      Icons.attach_money,
-                      Colors.green),
-                ],
-              ),
-              const SizedBox(height: 28),
-
-              // Shopee-style Menu Grid
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: menuItems.length,
-                gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 4,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 0.9,
+      body: Column(
+        children: [
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _loadData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        _buildKpiCard(
+                            'total_produk', _totalProduk.toString(), Icons.store, tomato),
+                        const SizedBox(width: 12),
+                        _buildKpiCard(
+                            'stok_habis', _stokHabis.toString(), Icons.warning_amber, Colors.redAccent),
+                        const SizedBox(width: 12),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        _buildKpiCard(
+                            'penjualan_hari_ini',
+                            'Rp ${_totalPenjualanHariIni.toStringAsFixed(0)}',
+                            Icons.attach_money,
+                            Colors.green),
+                      ],
+                    ),
+                    const SizedBox(height: 28),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: menuItems.length,
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 4,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 0.9,
+                      ),
+                      itemBuilder: (_, index) {
+                        final item = menuItems[index];
+                        return _ShopeeMenuItem(item: item, tomato: tomato);
+                      },
+                    ),
+                  ],
                 ),
-                itemBuilder: (_, index) {
-                  final item = menuItems[index];
-                  return _ShopeeMenuItem(item: item, tomato: tomato);
-                },
               ),
-            ],
+            ),
           ),
-        ),
+          if (_bannerAd != null)
+            SizedBox(
+              width: _bannerAd!.size.width.toDouble(),
+              height: _bannerAd!.size.height.toDouble(),
+              child: AdWidget(ad: _bannerAd!),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _buildKpiCard(
-      String title, String value, IconData icon, Color color) {
+  Widget _buildKpiCard(String titleKey, String value, IconData icon, Color color) {
     return Expanded(
       child: Card(
         elevation: 5,
@@ -256,7 +337,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                title,
+                titleKey.tr,
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 12, color: Colors.black54),
               ),
@@ -268,7 +349,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
-// Shopee-style Menu Item
 class _ShopeeMenuItem extends StatelessWidget {
   final _DashboardMenu item;
   final Color tomato;
@@ -296,8 +376,7 @@ class _ShopeeMenuItem extends StatelessWidget {
                   right: -2,
                   top: -2,
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: Colors.red,
                       borderRadius: BorderRadius.circular(12),
